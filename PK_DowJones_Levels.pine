@@ -1,8 +1,8 @@
 //@version=6
-indicator("PK DowJones Levels", shorttitle = "PK Levels", overlay = true, max_lines_count = 500, max_labels_count = 500)
+indicator("PK - Dow Jones", overlay = true, max_lines_count = 500, max_labels_count = 500)
 
 // =============================================================================
-// PK DowJones Levels
+// PK - Dow Jones
 // -----------------------------------------------------------------------------
 // High / low / mid levels around the New York session:
 //   - Previous week and previous day
@@ -486,11 +486,11 @@ var table warnTable = table.new(position.top_right, 1, 1)
 if barstate.islast
     string msg = ""
     if not tfPdPwOk
-        msg := "PK Levels: use an intraday chart."
+        msg := "PK - Dow Jones: use an intraday chart."
     else if not sessValid
-        msg := "PK Levels: invalid NY session (start 04:00 or later, end after start)."
+        msg := "PK - Dow Jones: invalid NY session (start 04:00 or later, end after start)."
     else if not intradayOk
-        msg := "PK Levels: session levels need a 1-30 min chart. Showing previous day / week only."
+        msg := "PK - Dow Jones: session levels need a 1-30 min chart. Showing previous day / week only."
     else if noPreData and (show4H or showP1)
-        msg := "PK Levels: no pre-market data on this symbol. Pre-NY levels unavailable."
+        msg := "PK - Dow Jones: no pre-market data on this symbol. Pre-NY levels unavailable."
     table.cell(warnTable, 0, 0, msg, text_color = color.gray, text_size = size.small, text_halign = text.align_right)
