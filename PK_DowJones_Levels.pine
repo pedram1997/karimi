@@ -536,3 +536,5 @@ if barstate.islast
     else if noPreData and (show4H or showP1 or show30)
         msg := "pk_dowjones_Levels: no pre-market data on this symbol. Pre-NY levels unavailable."
     table.cell(warnTable, 0, 0, msg, text_color = color.gray, text_size = size.small, text_halign = text.align_right)
+
+// END pk_dowjones_Levels
