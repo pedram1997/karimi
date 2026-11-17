@@ -6,7 +6,7 @@ indicator("pk_dowjones_Levels", overlay = true, max_lines_count = 500, max_label
 // Author: pk_dowjones
 // -----------------------------------------------------------------------------
 // High / low / mid levels around the New York session:
-//   - Previous week and previous day
+//   - Previous month, previous week and previous day
 //   - One 4H, one 1H and one 30m candle at a time: first the candle right before
 //     the NY open, then the last completed candle inside the NY session
 //     (each newly closed candle deletes and replaces the previous one)
@@ -32,6 +32,7 @@ const int KIND_S4   = 4   // last completed 4H candle inside the NY session
 const int KIND_S1   = 5   // last completed 1H candle inside the NY session
 const int KIND_PRE30 = 6  // 30m candle before the NY open
 const int KIND_S30   = 7  // last completed 30m candle inside the NY session
+const int KIND_PM    = 8  // previous month
 
 const string BASIS_OPEN = "From NY open"
 const string BASIS_STD  = "Standard chart candles"
@@ -43,6 +44,7 @@ const string GRP_MID     = "Mid Lines"
 const string GRP_LABELS  = "Labels"
 const string GRP_DISPLAY = "Display"
 const string GRP_30M     = "30m Candle"
+const string GRP_PM      = "Previous Month"
 
 // -----------------------------------------------------------------------------
 // Inputs
@@ -85,6 +87,11 @@ bool  show30 = input.bool(true, "Show", inline = "M30", group = GRP_30M, display
 color col30  = input.color(#43A047, "", inline = "M30", group = GRP_30M, display = display.none)
 int   wid30  = input.int(1, "Width", minval = 1, maxval = 5, inline = "M30", group = GRP_30M, display = display.none, tooltip = "The last completed 30m candle (30m HH:mm High / Low / Mid). At the NY open this is the 30m candle right before the open; each 30m candle that closes inside the session then replaces it. Only one 30m candle is on the chart at a time. Follows the candle basis setting.")
 
+// Previous month. Declared last so settings already saved on the chart keep their place.
+bool  showPM = input.bool(true, "Show", inline = "PM", group = GRP_PM, display = display.none)
+color colPM  = input.color(#E91E63, "", inline = "PM", group = GRP_PM, display = display.none)
+int   widPM  = input.int(2, "Width", minval = 1, maxval = 5, inline = "PM", group = GRP_PM, display = display.none, tooltip = "Previous monthly candle: PMH / PML / PM Mid. Lines start at the beginning of the current month.")
+
 // -----------------------------------------------------------------------------
 // Derived settings
 // -----------------------------------------------------------------------------
@@ -126,6 +133,7 @@ string tf1H  = tfSec <= 3600 ? "60" : timeframe.period
 string tf4H  = tfSec <= 14400 ? "240" : timeframe.period
 string tfDay = tfSec <= 86400 ? "D" : timeframe.period
 string tfWk  = tfSec <= 604800 ? "W" : timeframe.period
+string tfMo  = tfSec <= 604800 ? "M" : timeframe.period
 
 // Time of the first loaded chart bar. Lines never start before it, so a level whose candle
 // began before the loaded history (e.g. the week start on a 1 min chart) is still anchored on the chart.
@@ -224,6 +232,7 @@ f_color(int _kind) =>
         KIND_PRE1 => colP1
         KIND_PRE30 => col30
         KIND_S30   => col30
+        KIND_PM    => colPM
         => colS1
 
 f_width(int _kind) =>
@@ -235,6 +244,7 @@ f_width(int _kind) =>
         KIND_PRE1 => widP1
         KIND_PRE30 => wid30
         KIND_S30   => wid30
+        KIND_PM    => widPM
         => widS1
 
 // Label texts for high / low / mid. _start = candle start time (shown for 4H and session 1H candles).
@@ -242,13 +252,14 @@ f_texts(int _kind, int _start) =>
     string base = switch _kind
         KIND_PW   => "PW"
         KIND_PD   => "PD"
+        KIND_PM   => "PM"
         KIND_PRE4 => "4H " + str.format_time(_start, "HH:mm", displayTz)
         KIND_S4   => "4H " + str.format_time(_start, "HH:mm", displayTz)
         KIND_PRE1 => "Pre-NY 1H"
         KIND_PRE30 => "30m " + str.format_time(_start, "HH:mm", displayTz)
         KIND_S30   => "30m " + str.format_time(_start, "HH:mm", displayTz)
         => "1H " + str.format_time(_start, "HH:mm", displayTz)
-    bool   shortName = _kind == KIND_PW or _kind == KIND_PD
+    bool   shortName = _kind == KIND_PW or _kind == KIND_PD or _kind == KIND_PM
     string tH = shortName ? base + "H" : base + " High"
     string tL = shortName ? base + "L" : base + " Low"
     string tM = base + " Mid"
@@ -370,6 +381,7 @@ var array<DaySet> dayStore = array.new<DaySet>()
 // [1] values with lookahead_on = the last fully closed candle: no repaint, no future data.
 [pdH, pdL, dayOpenT]  = request.security(syminfo.tickerid, tfDay, f_prevDay(), lookahead = barmerge.lookahead_on)
 [pwH, pwL, weekOpenT] = request.security(syminfo.tickerid, tfWk, [high[1], low[1], time], lookahead = barmerge.lookahead_on)
+[pmH, pmL, monthOpenT] = request.security(syminfo.tickerid, tfMo, [high[1], low[1], time], lookahead = barmerge.lookahead_on)
 
 // Trading day of the current bar (time_tradingday is 00:00 UTC of that day).
 int  tdT       = time_tradingday + 12 * MS_HOUR
@@ -388,6 +400,10 @@ if tfPdPwOk and newTDay and tdWeekday and (showPW or showPD)
         f_addSet(dayStore, tday, KIND_PW, weekOpenT, pwH, pwL)
     if showPD
         f_addSet(dayStore, tday, KIND_PD, dayOpenT, pdH, pdL)
+
+// Previous month: same rules as the previous week.
+if tfPdPwOk and newTDay and tdWeekday and showPM
+    f_addSet(dayStore, f_getDay(dayStore, tdKey, tdEndT), KIND_PM, monthOpenT, pmH, pmL)
 
 // -----------------------------------------------------------------------------
 // NY clock of the current bar
