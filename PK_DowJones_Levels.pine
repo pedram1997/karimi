@@ -7,7 +7,7 @@ indicator("pk_dowjones_Levels", overlay = true, max_lines_count = 500, max_label
 // -----------------------------------------------------------------------------
 // High / low / mid levels around the New York session:
 //   - Previous month, previous week and previous day
-//   - One 4H, one 1H and one 30m candle at a time: first the candle right before
+//   - One 4H, one 1H, one 30m and one 15m candle at a time: first the candle right before
 //     the NY open, then the last completed candle inside the NY session
 //     (each newly closed candle deletes and replaces the previous one)
 // All session math runs in the America/New_York time zone, so the weeks where
@@ -22,6 +22,7 @@ indicator("pk_dowjones_Levels", overlay = true, max_lines_count = 500, max_label
 const string NY_TZ     = "America/New_York"
 const int    MS_HOUR   = 3600000
 const int    MS_30M    = 1800000
+const int    MS_15M    = 900000
 const int    MAX_LINES = 500
 
 const int KIND_PW   = 0   // previous week
@@ -33,6 +34,8 @@ const int KIND_S1   = 5   // last completed 1H candle inside the NY session
 const int KIND_PRE30 = 6  // 30m candle before the NY open
 const int KIND_S30   = 7  // last completed 30m candle inside the NY session
 const int KIND_PM    = 8  // previous month
+const int KIND_PRE15 = 9  // 15m candle before the NY open
+const int KIND_S15   = 10 // last completed 15m candle inside the NY session
 
 const string BASIS_OPEN = "From NY open"
 const string BASIS_STD  = "Standard chart candles"
@@ -45,6 +48,7 @@ const string GRP_LABELS  = "Labels"
 const string GRP_DISPLAY = "Display"
 const string GRP_30M     = "30m Candle"
 const string GRP_PM      = "Previous Month"
+const string GRP_15M     = "15m Candle"
 
 // -----------------------------------------------------------------------------
 // Inputs
@@ -71,7 +75,7 @@ color colS1  = input.color(#868993, "", inline = "S1", group = GRP_LEVELS, displ
 int   widS1  = input.int(1, "Width", minval = 1, maxval = 5, inline = "S1", group = GRP_LEVELS, display = display.none, tooltip = "The last completed 1H candle inside the NY session. Only one 1H candle is on the chart at a time: each newly closed candle replaces the previous one. Incomplete candles are not drawn.")
 
 bool   showMid    = input.bool(true, "Show mid lines", group = GRP_MID, display = display.none, tooltip = "Mid = (high + low) / 2 of each candle. Drawn 1 px wide and faint, in the same color as its group.")
-int    midTransp  = input.int(70, "Mid transparency (%)", minval = 0, maxval = 100, step = 5, group = GRP_MID, display = display.none, tooltip = "0 = solid, 100 = invisible. Also used for the mid labels.")
+int    midTransp  = input.int(60, "Mid transparency (%)", minval = 0, maxval = 100, step = 5, group = GRP_MID, display = display.none, tooltip = "0 = solid, 100 = invisible. Also used for the mid labels.")
 string midStyleIn = input.string("Dotted", "Mid line style", options = ["Dotted", "Dashed", "Solid"], group = GRP_MID, display = display.none, tooltip = "Line style of the mid lines.")
 
 bool   showLabels   = input.bool(true, "Show labels", group = GRP_LABELS, display = display.none, tooltip = "Small text labels next to the lines, in the line's color.")
@@ -91,6 +95,11 @@ int   wid30  = input.int(1, "Width", minval = 1, maxval = 5, inline = "M30", gro
 bool  showPM = input.bool(true, "Show", inline = "PM", group = GRP_PM, display = display.none)
 color colPM  = input.color(#E91E63, "", inline = "PM", group = GRP_PM, display = display.none)
 int   widPM  = input.int(2, "Width", minval = 1, maxval = 5, inline = "PM", group = GRP_PM, display = display.none, tooltip = "Previous monthly candle: PMH / PML / PM Mid. Lines start at the beginning of the current month.")
+
+// 15m candle. Declared last so settings already saved on the chart keep their place.
+bool  show15 = input.bool(true, "Show", inline = "M15", group = GRP_15M, display = display.none)
+color col15  = input.color(#FDD835, "", inline = "M15", group = GRP_15M, display = display.none)
+int   wid15  = input.int(1, "Width", minval = 1, maxval = 5, inline = "M15", group = GRP_15M, display = display.none, tooltip = "The last completed 15m candle (15m HH:mm High / Low / Mid). At the NY open this is the 15m candle right before the open; each 15m candle that closes inside the session then replaces it. Only one 15m candle is on the chart at a time. Shown on 1-15 min charts. Follows the candle basis setting.")
 
 // -----------------------------------------------------------------------------
 // Derived settings
@@ -125,9 +134,12 @@ int  tfSec      = nz(timeframe.in_seconds(), 0)
 int  tfMs       = (tfSec > 0 ? tfSec : 60) * 1000
 bool tfPdPwOk   = timeframe.isintraday or timeframe.isdaily
 bool intradayOk = (timeframe.isminutes or timeframe.isseconds) and tfSec > 0 and tfSec <= 1800 and sessValid
+// The 15m candle needs a 1-15 minute (or seconds) chart.
+bool tf15Ok     = intradayOk and tfSec <= 900
 
 // Requested timeframes. They fall back to the chart timeframe on charts where a level is not used,
 // so no request ever asks for a timeframe lower than the chart's.
+string tf15  = tfSec <= 900 ? "15" : timeframe.period
 string tf30  = tfSec <= 1800 ? "30" : timeframe.period
 string tf1H  = tfSec <= 3600 ? "60" : timeframe.period
 string tf4H  = tfSec <= 14400 ? "240" : timeframe.period
@@ -233,6 +245,8 @@ f_color(int _kind) =>
         KIND_PRE30 => col30
         KIND_S30   => col30
         KIND_PM    => colPM
+        KIND_PRE15 => col15
+        KIND_S15   => col15
         => colS1
 
 f_width(int _kind) =>
@@ -245,6 +259,8 @@ f_width(int _kind) =>
         KIND_PRE30 => wid30
         KIND_S30   => wid30
         KIND_PM    => widPM
+        KIND_PRE15 => wid15
+        KIND_S15   => wid15
         => widS1
 
 // Label texts for high / low / mid. _start = candle start time (shown for 4H and session 1H candles).
@@ -258,6 +274,8 @@ f_texts(int _kind, int _start) =>
         KIND_PRE1 => "Pre-NY 1H"
         KIND_PRE30 => "30m " + str.format_time(_start, "HH:mm", displayTz)
         KIND_S30   => "30m " + str.format_time(_start, "HH:mm", displayTz)
+        KIND_PRE15 => "15m " + str.format_time(_start, "HH:mm", displayTz)
+        KIND_S15   => "15m " + str.format_time(_start, "HH:mm", displayTz)
         => "1H " + str.format_time(_start, "HH:mm", displayTz)
     bool   shortName = _kind == KIND_PW or _kind == KIND_PD or _kind == KIND_PM
     string tH = shortName ? base + "H" : base + " High"
@@ -300,6 +318,8 @@ f_family(int _kind) =>
         KIND_S1   => 1
         KIND_PRE30 => 30
         KIND_S30   => 30
+        KIND_PRE15 => 15
+        KIND_S15   => 15
         => 0
 
 // Deletes every set of one candle family in a day, lines and labels included.
@@ -421,6 +441,7 @@ bool doIntra   = intradayOk and isWeekday
 bool inPre4 = isWeekday and time >= openT - 4 * MS_HOUR and time < openT
 bool inPre1 = isWeekday and time >= openT - MS_HOUR and time < openT
 bool inPre30 = isWeekday and time >= openT - MS_30M and time < openT
+bool inPre15 = isWeekday and time >= openT - MS_15M and time < openT
 bool inSess = isWeekday and time >= openT and time < closeT
 
 // First bar at or after the NY open of the day.
@@ -450,12 +471,21 @@ if inSess
     if st30 + MS_30M <= closeT
         s30Start := st30
 
+// 15m windows from the NY open (09:30-09:45, 09:45-10:00 ... NY), same rule as above.
+int s15Start = na
+if inSess
+    int st15 = openT + int(math.floor((time - openT) / MS_15M)) * MS_15M
+    if st15 + MS_15M <= closeT
+        s15Start := st15
+
 var Acc accP4 = Acc.new()
 var Acc accP1 = Acc.new()
 var Acc accS4 = Acc.new()
 var Acc accS1 = Acc.new()
 var Acc accP30 = Acc.new()
 var Acc accS30 = Acc.new()
+var Acc accP15 = Acc.new()
+var Acc accS15 = Acc.new()
 
 [p4Done, p4H, p4L, p4S] = accP4.feed(inPre4 ? openT - 4 * MS_HOUR : na, openT, dayKey)
 [p1Done, p1H, p1L, p1S] = accP1.feed(inPre1 ? openT - MS_HOUR : na, openT, dayKey)
@@ -463,6 +493,8 @@ var Acc accS30 = Acc.new()
 [s1Done, s1H, s1L, s1S] = accS1.feed(s1Start, s1Start + MS_HOUR, dayKey)
 [p30Done, p30H, p30L, p30S] = accP30.feed(inPre30 ? openT - MS_30M : na, openT, dayKey)
 [s30Done, s30H, s30L, s30S] = accS30.feed(s30Start, s30Start + MS_30M, dayKey)
+[p15Done, p15H, p15L, p15S] = accP15.feed(inPre15 ? openT - MS_15M : na, openT, dayKey)
+[s15Done, s15H, s15L, s15S] = accS15.feed(s15Start, s15Start + MS_15M, dayKey)
 
 if modeOpen and doIntra
     if p4Done and show4H
@@ -477,6 +509,10 @@ if modeOpen and doIntra
         f_addSet(dayStore, f_getDay(dayStore, dayKey, closeT), KIND_PRE30, p30S, p30H, p30L)
     if s30Done and show30
         f_addSet(dayStore, f_getDay(dayStore, dayKey, closeT), KIND_S30, s30S, s30H, s30L)
+    if p15Done and show15 and tf15Ok
+        f_addSet(dayStore, f_getDay(dayStore, dayKey, closeT), KIND_PRE15, p15S, p15H, p15L)
+    if s15Done and show15 and tf15Ok
+        f_addSet(dayStore, f_getDay(dayStore, dayKey, closeT), KIND_S15, s15S, s15H, s15L)
 
 // -----------------------------------------------------------------------------
 // Basis 2: standard chart 1H / 4H candles
@@ -489,6 +525,9 @@ bool new4H = timeframe.change(tf4H)
 // Same for the standard 30m candles.
 [h30, l30, o30, c30] = request.security(syminfo.tickerid, tf30, [high[1], low[1], time[1], time_close[1]], lookahead = barmerge.lookahead_on)
 bool new30 = timeframe.change(tf30)
+// Same for the standard 15m candles.
+[h15, l15, o15, c15] = request.security(syminfo.tickerid, tf15, [high[1], low[1], time[1], time_close[1]], lookahead = barmerge.lookahead_on)
+bool new15 = timeframe.change(tf15)
 
 if not modeOpen and doIntra
     if firstSessBar
@@ -499,6 +538,8 @@ if not modeOpen and doIntra
             f_addSet(dayStore, f_getDay(dayStore, dayKey, closeT), KIND_PRE1, o1H, h1H, l1H)
         if show30 and not na(c30) and c30 <= openT and c30 > openT - MS_30M
             f_addSet(dayStore, f_getDay(dayStore, dayKey, closeT), KIND_PRE30, o30, h30, l30)
+        if show15 and tf15Ok and not na(c15) and c15 <= openT and c15 > openT - MS_15M
+            f_addSet(dayStore, f_getDay(dayStore, dayKey, closeT), KIND_PRE15, o15, h15, l15)
     // Session: every candle that closed after the open and at or before the close.
     if new4H and show4H and not na(c4H) and c4H > openT and c4H <= closeT
         f_addSet(dayStore, f_getDay(dayStore, dayKey, closeT), KIND_S4, o4H, h4H, l4H)
@@ -506,6 +547,8 @@ if not modeOpen and doIntra
         f_addSet(dayStore, f_getDay(dayStore, dayKey, closeT), KIND_S1, o1H, h1H, l1H)
     if new30 and show30 and not na(c30) and c30 > openT and c30 <= closeT
         f_addSet(dayStore, f_getDay(dayStore, dayKey, closeT), KIND_S30, o30, h30, l30)
+    if new15 and show15 and tf15Ok and not na(c15) and c15 > openT and c15 <= closeT
+        f_addSet(dayStore, f_getDay(dayStore, dayKey, closeT), KIND_S15, o15, h15, l15)
 
 // -----------------------------------------------------------------------------
 // Pre-market data check (for the warning)
@@ -549,7 +592,7 @@ if barstate.islast
         msg := "pk_dowjones_Levels: invalid NY session (start 04:00 or later, end after start)."
     else if not intradayOk
         msg := "pk_dowjones_Levels: session levels need a 1-30 min chart. Showing previous day / week only."
-    else if noPreData and (show4H or showP1 or show30)
+    else if noPreData and (show4H or showP1 or show30 or show15)
         msg := "pk_dowjones_Levels: no pre-market data on this symbol. Pre-NY levels unavailable."
     table.cell(warnTable, 0, 0, msg, text_color = color.gray, text_size = size.small, text_halign = text.align_right)
 
